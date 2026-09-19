@@ -45,3 +45,9 @@ test('parseEpayReturnUrl returns the payload, or undefined without data', () => 
   assert.deepEqual(parseEpayReturnUrl(`myapp://esewa/success?data=${encoded}`), payload);
   assert.equal(parseEpayReturnUrl('myapp://esewa/failure'), undefined);
 });
+
+test('extractEpayData keeps a raw + from base64 instead of turning it into a space', () => {
+  const withPlus = 'ab+cd/ef==';
+  assert.equal(extractEpayData(`myapp://esewa/success?data=${withPlus}`), withPlus);
+  assert.equal(extractEpayData('myapp://esewa/success?data=ab cd'), 'ab+cd');
+});

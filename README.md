@@ -159,7 +159,7 @@ processEsewaPayment({
 });
 ```
 
-Each callback is called at most once per payment. `onError` receives a `PaymentFlowError` (`E_PAYMENT_FAILED` or `E_TIMEOUT`) when the server reports a failure or the payment never settles, or the original error when a step throws.
+Each callback is called at most once per payment. `onError` always receives a `PaymentFlowError`: `E_PAYMENT_FAILED` or `E_TIMEOUT` when the server reports a failure or the payment never settles, or a wrapped error (`step` and `cause` set) when a step throws.
 
 ### Low level
 
@@ -225,7 +225,50 @@ Full signatures and options are in the [API reference](docs/api-reference.md).
 
 ## Errors
 
-`EsewaError.code` is one of `E_NOT_INSTALLED`, `E_OPEN_FAILED`, `E_NO_FLOW`, `E_TIMEOUT`, `E_ABORTED`, `E_INVALID_ARGUMENTS`, `E_INVALID_RESPONSE`, `E_NOT_LINKED`. `error.isCancelled` is true when the user never came back or the wait was aborted. The generic flow raises `PaymentFlowError` with `E_TIMEOUT`, `E_ABORTED`, `E_VERIFY_FAILED`, `E_PAYMENT_FAILED` or `E_NO_VERIFY`.
+`EsewaError.code` is one of `E_NOT_INSTALLED`, `E_OPEN_FAILED`, `E_NO_FLOW`, `E_TIMEOUT`, `E_ABORTED`, `E_INVALID_ARGUMENTS`, `E_INVALID_RESPONSE`, `E_NOT_LINKED`. `error.isCancelled` is true when the user never came back or the wait was aborted. The generic flow raises `PaymentFlowError` with `E_INITIATE_FAILED`, `E_PRESENT_FAILED`, `E_VERIFY_FAILED`, `E_PAYMENT_FAILED`, `E_TIMEOUT`, `E_ABORTED` or `E_NO_VERIFY`.
+
+### Typed results and errors
+
+Everything is typed end to end. A flow result is a discriminated union on `outcome`, so TypeScript only lets you read what exists:
+
+```ts
+const result = await processEsewaPayment({ initiate, verify });
+
+switch (result.outcome) {
+  case 'success':
+    result.initiation;
+    break;
+  case 'failed':
+  case 'timeout':
+    result.error.code;
+    break;
+  case 'cancelled':
+    break;
+}
+```
+
+There is one error model. Every failure is a `PaymentFlowError` with:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `code` | `PaymentFlowErrorCodeValue` | Stable code: `E_INITIATE_FAILED`, `E_PRESENT_FAILED`, `E_VERIFY_FAILED`, `E_PAYMENT_FAILED`, `E_TIMEOUT`, `E_ABORTED`, `E_NO_VERIFY`. |
+| `step` | `'initiate' \| 'present' \| 'verify' \| null` | Where in the flow it happened. |
+| `cause` | `unknown` | The original error, for example your API's error or a `EsewaError`. |
+| `isCancelled` | `boolean` | True for `E_ABORTED`. |
+
+To handle eSewa-specific errors, read the cause with the typed helper:
+
+```ts
+import { getEsewaError, PaymentFlowErrorCode } from '@klixsoft/react-native-esewa';
+
+onError: (error) => {
+  const esewaError = getEsewaError(error);
+  if (esewaError?.isCancelled) return;
+  if (error.code === PaymentFlowErrorCode.InitiateFailed) showToast('Could not start the payment');
+}
+```
+
+`isEsewaError(value)` and `isPaymentFlowError(value)` are type guards for values of unknown type.
 
 ## Security
 

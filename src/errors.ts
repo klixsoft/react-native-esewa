@@ -1,3 +1,6 @@
+import { isPaymentFlowError } from './flow';
+import type { PaymentFlowError } from './flow';
+
 /** Stable, machine readable error codes. Match on these, never on `message`. */
 export const EsewaErrorCode = {
   /** The eSewa app is not installed (Intent flow). */
@@ -21,11 +24,11 @@ export const EsewaErrorCode = {
 export type EsewaErrorCodeValue = (typeof EsewaErrorCode)[keyof typeof EsewaErrorCode];
 
 export class EsewaError extends Error {
+  override readonly name = 'EsewaError';
   readonly code: EsewaErrorCodeValue;
 
   constructor(code: EsewaErrorCodeValue, message: string) {
     super(message);
-    this.name = 'EsewaError';
     this.code = code;
   }
 
@@ -33,4 +36,17 @@ export class EsewaError extends Error {
   get isCancelled(): boolean {
     return this.code === EsewaErrorCode.Timeout || this.code === EsewaErrorCode.Aborted;
   }
+}
+
+/** Type guard for {@link EsewaError}. */
+export function isEsewaError(error: unknown): error is EsewaError {
+  return error instanceof EsewaError;
+}
+
+/**
+ * The eSewa error behind a flow error, when the failure came from the eSewa step (its `cause`).
+ * Use it to branch on eSewa-specific `code`s after `runPaymentFlow`, `use...Payment` or `onError`.
+ */
+export function getEsewaError(error: PaymentFlowError | null | undefined): EsewaError | undefined {
+  return isPaymentFlowError(error) && error.cause instanceof EsewaError ? error.cause : undefined;
 }

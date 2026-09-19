@@ -1,12 +1,23 @@
 import { EsewaError, EsewaErrorCode } from './errors';
 
+/** The transaction status eSewa reports in an ePay v2 response. */
+export type EpayStatus =
+  | 'COMPLETE'
+  | 'PENDING'
+  | 'FULL_REFUND'
+  | 'PARTIAL_REFUND'
+  | 'AMBIGUOUS'
+  | 'NOT_FOUND'
+  | 'CANCELED'
+  | (string & {});
+
 /**
- * The payload eSewa appends (base64 encoded JSON) to the ePay v2 `success_url`.
- * Field names follow eSewa's documentation.
+ * The payload eSewa appends (base64 encoded JSON) to the ePay v2 `success_url`. It is **unverified**:
+ * check it on your server. Field names follow eSewa's documentation.
  */
 export interface EpayResponse {
   transaction_code?: string;
-  status?: string;
+  status?: EpayStatus;
   total_amount?: string | number;
   transaction_uuid?: string;
   product_code?: string;
@@ -35,23 +46,24 @@ function base64ToBytes(input: string): number[] {
   return bytes;
 }
 
-function utf8ToString(bytes: number[]): string {
+function utf8ToString(bytes: readonly number[]): string {
   let out = '';
-  for (let i = 0; i < bytes.length; ) {
-    const b = bytes[i++];
-    let code = b;
+  let i = 0;
+  while (i < bytes.length) {
+    const first = bytes[i++] ?? 0;
+    let code = first;
     let extra = 0;
-    if (b >= 0xf0) {
-      code = b & 0x07;
+    if (first >= 0xf0) {
+      code = first & 0x07;
       extra = 3;
-    } else if (b >= 0xe0) {
-      code = b & 0x0f;
+    } else if (first >= 0xe0) {
+      code = first & 0x0f;
       extra = 2;
-    } else if (b >= 0xc0) {
-      code = b & 0x1f;
+    } else if (first >= 0xc0) {
+      code = first & 0x1f;
       extra = 1;
     }
-    for (; extra > 0; extra--) code = (code << 6) | (bytes[i++] & 0x3f);
+    for (; extra > 0; extra--) code = (code << 6) | ((bytes[i++] ?? 0) & 0x3f);
     out += String.fromCodePoint(code);
   }
   return out;
@@ -83,13 +95,13 @@ export function parseEpayData(data: string): EpayResponse {
 
 /** Reads the `data` query parameter from a return URL without needing the URL class. */
 export function extractEpayData(url: string): string | undefined {
-  const query = url.split('#')[0].split('?')[1];
+  const query = url.split('#')[0]?.split('?')[1];
   if (!query) return undefined;
 
   for (const pair of query.split('&')) {
     const [key, ...rest] = pair.split('=');
     if (key === 'data') {
-      return decodeURIComponent(rest.join('=').replace(/\+/g, ' '));
+      return decodeURIComponent(rest.join('=')).replace(/ /g, '+');
     }
   }
   return undefined;

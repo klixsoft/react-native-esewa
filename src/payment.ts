@@ -11,18 +11,26 @@ export interface EsewaInitiateContext {
   flow: EsewaFlow;
 }
 
-/** What your server returns from `initiate`: the Intent `deeplink`, or the ePay form URL. */
-export interface EsewaInitiateResult {
-  /** The `deeplink` from eSewa's booking response. Required when `context.flow` is `intent`. */
-  deeplink?: string;
-  /** Your server URL that auto-submits the signed ePay form. Required when `context.flow` is `epay`. */
+/** The Intent booking: the `deeplink` from eSewa's booking response. */
+export interface EsewaIntentInitiation {
+  deeplink: string;
   epayUrl?: string;
 }
 
-/** The initiated payment, including the flow that was chosen. */
-export interface EsewaInitiation extends EsewaInitiateResult {
-  flow: EsewaFlow;
+/** The ePay form: your server URL that auto-submits the signed form. */
+export interface EsewaEpayInitiation {
+  deeplink?: string;
+  epayUrl: string;
 }
+
+/**
+ * What your server returns from `initiate`. Return a `deeplink` when `context.flow` is `intent`
+ * and an `epayUrl` when it is `epay`; at least one of them is required.
+ */
+export type EsewaInitiateResult = EsewaIntentInitiation | EsewaEpayInitiation;
+
+/** The initiated payment, including the flow that was chosen. */
+export type EsewaInitiation = EsewaInitiateResult & { flow: EsewaFlow };
 
 export interface EsewaPaymentOptions
   extends PollOptions,
@@ -65,15 +73,16 @@ export function createEsewaFlow(options: EsewaPaymentOptions): PaymentFlowOption
       const result = await options.initiate({ flow });
       return { ...result, flow };
     },
-    present: (initiation) =>
-      pay({
+    present: async (initiation) => {
+      await pay({
         flow: initiation.flow,
         intent: initiation.deeplink ? { deeplink: initiation.deeplink } : undefined,
         epay: initiation.epayUrl
           ? { url: initiation.epayUrl, returnPrefix: options.returnPrefix, openUrl: options.openUrl }
           : undefined,
         signal: options.signal,
-      }),
+      });
+    },
     verify: options.verify,
     isCancelled: (error) => error instanceof EsewaError && error.isCancelled,
   };
