@@ -28,4 +28,9 @@ export class EsewaError extends Error {
     this.name = 'EsewaError';
     this.code = code;
   }
+
+  /** True when the user did not complete the payment: they never came back, or it was aborted. */
+  get isCancelled(): boolean {
+    return this.code === EsewaErrorCode.Timeout || this.code === EsewaErrorCode.Aborted;
+  }
 }

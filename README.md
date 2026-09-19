@@ -1,24 +1,38 @@
 # @klixsoft/react-native-esewa
 
-Accept [eSewa](https://esewa.com.np) payments in React Native with both of eSewa's current
-integrations, and **no embedded WebView**:
+[![npm version](https://img.shields.io/npm/v/@klixsoft/react-native-esewa.svg)](https://www.npmjs.com/package/@klixsoft/react-native-esewa)
+[![npm downloads](https://img.shields.io/npm/dm/@klixsoft/react-native-esewa.svg)](https://www.npmjs.com/package/@klixsoft/react-native-esewa)
+[![CI](https://github.com/klixsoft/react-native-esewa/actions/workflows/ci.yml/badge.svg)](https://github.com/klixsoft/react-native-esewa/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/@klixsoft/react-native-esewa.svg)](LICENSE)
+[![platforms](https://img.shields.io/badge/platforms-android%20%7C%20ios-blue.svg)](#requirements)
+[![types](https://img.shields.io/badge/types-TypeScript-3178c6.svg)](#api)
 
-| Flow | What the user sees | Use it when |
-| --- | --- | --- |
-| **Intent** (recommended) | Your app jumps straight into the eSewa app, pays, and returns | The eSewa app is installed (most Nepali users) |
-| **ePay v2** | The hosted eSewa payment page opens in the browser, then returns to your app | The user has no eSewa app, or you want the web login |
+Accept [eSewa](https://esewa.com.np) payments in React Native with both current integrations: **Intent** (app to app) and **ePay v2** (hosted page). eSewa publishes no React Native package and its old native SDKs are deprecated, so this library is a small native module for the eSewa app plus a standard `initiate` / `verify` flow.
 
-`pay({ flow: 'auto' })` picks Intent when the eSewa app is installed and falls back to ePay otherwise.
+## Features
 
-eSewa's older native SDKs are deprecated and eSewa publishes no React Native package, so this
-library is deliberately small: a native module that talks to the eSewa **app** (install check and
-deep link), plus TypeScript that orchestrates the flow and detects the return. Nothing proprietary
-is bundled.
+- **Intent** flow: jumps straight into the eSewa app and returns; **ePay v2** as the fallback for users without the app
+- `flow: 'auto'` picks Intent when the eSewa app is installed, otherwise ePay, and tells your server which to prepare
+- One call for the whole payment: `processEsewaPayment({ initiate, verify })`, or the `useEsewaPayment` hook
+- Return detection through deep links or app foreground; ePay response parsing helpers
+- Typed results and stable error codes
+- React Native **New Architecture** (TurboModule + codegen); Android module in Java; nothing proprietary bundled
 
-> **Security in one line:** eSewa payments are signed with a **secret key that must never ship in
-> the app**. Your server books/signs the payment and **verifies the result with eSewa's status API**
-> before granting anything. What this library returns is only "the user came back". See
-> [docs/security.md](docs/security.md).
+## Table of contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Server contract](#server-contract)
+- [API](#api)
+- [Errors](#errors)
+- [Security](#security)
+- [Documentation](#documentation)
+- [Versioning and releases](#versioning-and-releases)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Requirements
 
@@ -28,14 +42,13 @@ is bundled.
 ## Installation
 
 ```sh
-pnpm add @klixsoft/react-native-esewa     # or npm / yarn
-cd ios && pod install
+pnpm add @klixsoft/react-native-esewa
+# or: npm install @klixsoft/react-native-esewa   /   yarn add @klixsoft/react-native-esewa
 ```
 
 ### iOS: allow the install check (required)
 
-iOS only lets an app probe for another app's URL scheme if it is declared. Add `esewa` to
-`ios/<App>/Info.plist`:
+Add `esewa` to `ios/<App>/Info.plist`, otherwise `isEsewaInstalled()` is always `false` on iOS:
 
 ```xml
 <key>LSApplicationQueriesSchemes</key>
@@ -44,114 +57,186 @@ iOS only lets an app probe for another app's URL scheme if it is declared. Add `
 </array>
 ```
 
-Without it `isEsewaInstalled()` always returns `false` on iOS.
+Then run `cd ios && pod install`.
 
 ### Android
 
-Nothing to do. The library's manifest declares `<queries><package android:name="com.f1soft.esewa" />`,
-which Android 11+ requires to detect the app.
+Nothing to do: the library manifest declares `<queries><package android:name="com.f1soft.esewa" /></queries>`, which Android 11+ needs to detect the app.
 
-### ePay return deep link (ePay flow only)
+### ePay return deep link (optional)
 
-Register a scheme for your app (for example `myapp://`) and use `myapp://esewa/success` and
-`myapp://esewa/failure` as the ePay `success_url` / `failure_url` your server sends to eSewa. If
-those URLs are HTTPS pages on your server, have that page redirect to the app scheme.
+Register a URL scheme for your app (for example `myapp://`) and point your ePay `success_url` / `failure_url` at it through your server. Without one, the flow detects the user returning by the app coming back to the foreground.
 
-## How a payment works
+## How it works
+
+Every Klixsoft payment package follows the same three-step lifecycle, so switching gateways does not change how your code is shaped:
 
 ```
- App                          Your server                       eSewa
-  | 1. "buy this" ---------->  |                                  |
-  |                            | 2. Intent: POST /intent/payment/book
-  |                            |    ePay:   build signed form URL |
-  |                            | -------------------------------> |
-  |  <-- deeplink | form url - |                                  |
-  | 3. pay({ intent | epay })  |                                  |
-  | ----------- opens the eSewa app / hosted page ------------->  |
-  |                            |  <-- callback + status API ----> |
-  | 4. user returns            |                                  |
-  | 5. pollPaymentState(...)  -> "did it succeed?" -> server asks eSewa
-  |  <----- success / failed ---|                                 |
+  Your app                     Your server                       eSewa
+     |  1. initiate()  ------>   |  create the payment  --------->  |
+     |  <----- what eSewa needs - |  <-------------------------------|
+     |  2. present  (open eSewa)                                |
+     |  3. verify()    ------>   |  ask eSewa for the real status -> |
+     |  <----- success | failed | pending                          |
 ```
 
-Steps 2 and 5 are yours; see [docs/backend-integration.md](docs/backend-integration.md) for the
-exact requests and signing code.
+| Step | You provide | The package does |
+| --- | --- | --- |
+| **initiate** | A function that calls **your server**, which creates the payment with eSewa and returns the Intent `deeplink` or the ePay form URL. | Calls it once, at the start. |
+| **present** | Nothing. | Opens the **eSewa app** (Intent) or the hosted **ePay v2** page, then waits for the user to come back. No embedded WebView. |
+| **verify** | A function that calls **your server**, which asks eSewa's status API and returns `success`, `failed` or `pending`. | Polls it until the payment settles, times out or is cancelled. |
+
+The result of `present` is never treated as proof of payment. Only `verify` decides the outcome, and it should always be answered by your server from eSewa's own API.
+
+## Quick start
+
+```tsx
+import { useEsewaPayment } from '@klixsoft/react-native-esewa';
+
+function PayButton({ orderId }: { orderId: string }) {
+  const { start, status, isProcessing } = useEsewaPayment({
+    initiate: async ({ flow }) => {
+      const order = await api.post(`/orders/${orderId}/esewa`, { flow });
+      return { deeplink: order.deeplink, epayUrl: order.epay_url };
+    },
+    verify: async () => (await api.get(`/orders/${orderId}/status`)).status,
+  });
+
+  return (
+    <Button
+      title={isProcessing ? status : 'Pay with eSewa'}
+      disabled={isProcessing}
+      onPress={async () => {
+        const result = await start();
+        if (result?.outcome === 'success') navigation.replace('Receipt');
+      }}
+    />
+  );
+}
+```
 
 ## Usage
 
-```tsx
-import { pay, pollPaymentState, EsewaError, EsewaErrorCode } from '@klixsoft/react-native-esewa';
+### Function
 
-async function buy(planId: string) {
-  const order = await api.post('/payments/esewa/start', { planId, returnPrefix: 'myapp://esewa' });
+```ts
+import { processEsewaPayment } from '@klixsoft/react-native-esewa';
 
-  try {
-    await pay({
-      flow: 'auto',
-      intent: { deeplink: order.deeplink },
-      epay: { url: order.epayUrl, returnPrefix: 'myapp://esewa' },
-    });
-
-    const outcome = await pollPaymentState(async () => {
-      const { status } = await api.get(`/payments/${order.id}/status`);
-      return status;
-    });
-
-    return outcome === 'success';
-  } catch (error) {
-    if (error instanceof EsewaError && error.code === EsewaErrorCode.NotInstalled) {
-      // offer openEsewaStore() or switch to the ePay flow
-    }
-    throw error;
-  }
-}
+const { outcome, initiation } = await processEsewaPayment({
+  flow: 'auto',
+  returnPrefix: 'myapp://esewa',
+  initiate: async ({ flow }) => {
+    const order = await api.post(`/orders/${orderId}/esewa`, { flow });
+    return { deeplink: order.deeplink, epayUrl: order.epay_url };
+  },
+  verify: async () => (await api.get(`/orders/${orderId}/status`)).status,
+});
 ```
 
-`pay()` resolves when the user returns to your app. It does **not** mean the payment succeeded, so
-always confirm with your server.
+`initiate` receives `{ flow }`, the flow the device will use, so your server books an Intent payment or prepares the ePay form accordingly. `initiation.flow` tells you afterwards which one ran.
+
+### Hook
+
+`useEsewaPayment(options)` returns `{ start, cancel, reset, status, isProcessing, error }`. `start()` never throws: failures are put in `error`.
 
 ### Choosing the flow
 
-```ts
-await pay({ flow: 'intent', intent: { deeplink } });   // eSewa app only; throws E_NOT_INSTALLED
-await pay({ flow: 'epay',   epay: { url } });          // hosted page only
-await pay({ flow: 'auto', intent: {...}, epay: {...} }); // Intent if installed, else ePay
-```
+| `flow` | Behaviour |
+| --- | --- |
+| `'auto'` (default) | Intent if the eSewa app is installed, otherwise ePay. |
+| `'intent'` | eSewa app only. Fails with `E_NOT_INSTALLED` if it is missing. |
+| `'epay'` | Hosted ePay v2 page only. |
 
-### Using an in-app browser for ePay
-
-By default ePay opens the system browser. To use Custom Tabs / SFSafariViewController, pass your
-own opener (for example with `react-native-inappbrowser-reborn`):
+### Low level
 
 ```ts
-epay: {
-  url,
-  returnPrefix: 'myapp://esewa',
-  openUrl: (u) => InAppBrowser.openAuth(u, 'myapp://esewa'),
-}
+import { pay, isEsewaInstalled, openEsewaStore } from '@klixsoft/react-native-esewa';
+
+await pay({ flow: 'intent', intent: { deeplink } });
+await pay({ flow: 'epay', epay: { url, returnPrefix: 'myapp://esewa' } });
 ```
+
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `initiate` | required | `({ flow }) => Promise<{ deeplink?, epayUrl? }>`. |
+| `verify` | required | Returns `'success' \| 'failed' \| 'pending'`. |
+| `flow` | `'auto'` | See above. |
+| `returnPrefix` | none | Deep link prefix your ePay return URLs use, for example `myapp://esewa`. |
+| `openUrl` | system browser | Custom opener for ePay, for example an in-app browser. |
+| `intervalMs` / `timeoutMs` | `3000` / `120000` | `verify` polling. |
+| `maxVerifyErrors` | `3` | Consecutive `verify` failures tolerated. |
+| `signal`, `onStatus` | none | Abort control and step callback. |
+
+### Generic building blocks
+
+The same helpers are exported by all three Klixsoft payment packages, so you can build your own flow on top of them:
+
+| Export | What it is |
+| --- | --- |
+| `runPaymentFlow(options)` | Runs `initiate`, `present` and `verify` in order and resolves with `{ outcome, initiation }`. |
+| `usePaymentFlow(options)` | The same as a React hook: `{ start, cancel, reset, status, isProcessing, error }`. |
+| `pollPaymentState(check, options)` | Polls your server until the state is `success` or `failed`; rejects `E_TIMEOUT` / `E_ABORTED`. |
+| `PaymentState` | `'success' \| 'failed' \| 'pending'`, what `verify` returns. |
+| `PaymentOutcome` | `'success' \| 'failed' \| 'cancelled' \| 'timeout'`, how a flow ended. |
+| `PaymentStatus` | `'idle' \| 'initiating' \| 'presenting' \| 'verifying'` or a `PaymentOutcome`, for driving your UI. |
+
+## Server contract
+
+| Flow | What your server does in `initiate` | What it returns |
+| --- | --- | --- |
+| Intent | Calls eSewa's *book payment* API with the signed request. | `{ deeplink }` from the booking response. |
+| ePay v2 | Prepares a signed form and exposes it as a page that auto-submits to eSewa. | `{ epayUrl }`, your page's URL. |
+
+`verify` must ask eSewa's status API (Intent: `payment/status`; ePay: `transaction/status`) and report `success` only for a completed payment of the expected amount. Signing and both status calls are covered in [Backend integration](docs/backend-integration.md).
 
 ## API
 
-See [docs/api-reference.md](docs/api-reference.md). In short: `pay`, `isEsewaInstalled`,
-`openEsewaStore`, `pollPaymentState`, `parseEpayData`, `parseEpayReturnUrl`, `EsewaError`.
+| Export | Purpose |
+| --- | --- |
+| `processEsewaPayment(options)` | Complete payment as a promise. |
+| `useEsewaPayment(options)` | Complete payment as a React hook. |
+| `createEsewaFlow(options)` | The flow object, for `runPaymentFlow` / `usePaymentFlow`. |
+| `pay(options)` | Open eSewa only (Intent or ePay). |
+| `isEsewaInstalled()` / `openEsewaStore()` | Install check and store link. |
+| `parseEpayData(data)` / `parseEpayReturnUrl(url)` | Decode the (unverified) ePay return payload. |
+| `EsewaError`, `EsewaErrorCode` | Typed errors. |
+
+Full signatures and options are in the [API reference](docs/api-reference.md).
+
+## Errors
+
+`EsewaError.code` is one of `E_NOT_INSTALLED`, `E_OPEN_FAILED`, `E_NO_FLOW`, `E_TIMEOUT`, `E_ABORTED`, `E_INVALID_ARGUMENTS`, `E_INVALID_RESPONSE`, `E_NOT_LINKED`. `error.isCancelled` is true when the user never came back or the wait was aborted. The generic flow raises `PaymentFlowError` with `E_TIMEOUT`, `E_ABORTED` or `E_VERIFY_FAILED`.
+
+## Security
+
+- eSewa requests are signed with a **secret key that must never ship in the app**. Book, sign and verify on your server.
+- Returning from eSewa, a deep link or a decoded ePay payload only means "the user came back". It can be forged. Grant access only after your server confirms the payment with eSewa's status API and checks the amount.
+- Bind the ePay form URL to the logged-in user or make it single-use.
+
+More in [docs/security.md](docs/security.md).
 
 ## Documentation
 
-- [Backend integration](docs/backend-integration.md): Intent booking, ePay signing, status checks (Node and Python)
+- [Backend integration](docs/backend-integration.md)
 - [API reference](docs/api-reference.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Changelog](CHANGELOG.md)
 
-## Testing
+## Versioning and releases
 
-eSewa provides sandbox credentials (see the backend guide). The Intent sandbox needs the eSewa
-**test** app on the device. Pure helpers are covered by `pnpm test` (Node's built-in runner).
+This package follows [Semantic Versioning](https://semver.org). While the version is `0.x`, minor releases may contain breaking changes; they are always listed in the [CHANGELOG](CHANGELOG.md). Releases are published to npm from a git tag by GitHub Actions with [provenance](https://docs.npmjs.com/generating-provenance-statements), see [CONTRIBUTING](CONTRIBUTING.md#releasing).
+
+## Contributing
+
+Issues and pull requests are welcome. Please read [CONTRIBUTING](CONTRIBUTING.md) first, and report security problems privately as described in [SECURITY](SECURITY.md).
 
 ## Disclaimer
 
-This is an independent, community library. It is not affiliated with or endorsed by eSewa.
+This is an independent, community-maintained library. It is not affiliated with, endorsed by or supported by eSewa.
 
 ## License
 
-MIT © Klixsoft
+[MIT](LICENSE) © Klixsoft

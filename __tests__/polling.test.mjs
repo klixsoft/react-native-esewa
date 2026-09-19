@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { pollPaymentState } from '../src/polling.ts';
+import { pollPaymentState } from '../src/flow.ts';
 
 function clock() {
   let time = 0;
