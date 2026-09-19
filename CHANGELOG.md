@@ -4,10 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-beta.2] - 2026-09-19
+
+### Documentation
+- README: Mermaid flow, state and per-gateway diagrams, an outcomes table, the exact server endpoints to build, and a list of common mistakes.
+
+### Changed
+- Releases are published from GitHub Actions with npm Trusted Publishing and provenance.
+
 ## [0.1.0-beta.1] - 2026-09-19
 
 ### Added
-- README: Mermaid flow, state and per-gateway diagrams, an outcomes table, the exact server endpoints to build, and a list of common mistakes.
 - `processEsewaPayment`, `useEsewaPayment` and `createEsewaFlow`: `initiate`, open eSewa, `verify`.
 - eSewa **Intent** flow: detects the eSewa app and opens the booking deep link directly (Android and iOS).
 - eSewa **ePay v2** flow: opens the hosted page and detects the return through a deep link or app foreground.
