@@ -27,6 +27,7 @@ Accept [eSewa](https://esewa.com.np) payments in React Native with both current 
 - [Usage](#usage)
 - [Server contract](#server-contract)
 - [API](#api)
+- [Common mistakes](#common-mistakes)
 - [Errors](#errors)
 - [Security](#security)
 - [Documentation](#documentation)
@@ -71,14 +72,37 @@ Register a URL scheme for your app (for example `myapp://`) and point your ePay 
 
 Every Klixsoft payment package follows the same three-step lifecycle, so switching gateways does not change how your code is shaped:
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Your app
+    participant Pkg as react-native-esewa
+    participant Srv as Your server
+    participant E as eSewa
+
+    App->>Pkg: start()
+    Pkg->>Pkg: pick Intent or ePay (flow: auto checks if the eSewa app is installed)
+    Pkg->>Srv: initiate with the chosen flow
+    alt Intent
+        Srv->>E: book payment with the signed request
+        E-->>Srv: booking_id and deeplink
+        Srv-->>Pkg: deeplink
+        Pkg->>E: open the eSewa app with the deeplink
+    else ePay v2
+        Srv-->>Pkg: epayUrl (page that submits the signed form)
+        Pkg->>E: open the ePay page in the browser
+    end
+    E-->>Pkg: user returns to your app
+    loop until success, failed or timeout
+        Pkg->>Srv: verify()
+        Srv->>E: status API
+        E-->>Srv: payment status
+        Srv-->>Pkg: success, failed or pending
+    end
+    Pkg-->>App: onSuccess, onCancel or onError
 ```
-  Your app                     Your server                       eSewa
-     |  1. initiate()  ------>   |  create the payment  --------->  |
-     |  <----- what eSewa needs - |  <-------------------------------|
-     |  2. present  (open eSewa)                                |
-     |  3. verify()    ------>   |  ask eSewa for the real status -> |
-     |  <----- success | failed | pending                          |
-```
+
+> Diagrams are [Mermaid](https://mermaid.js.org). GitHub renders them; on npmjs.com they show as code, so read this README on GitHub for the pictures.
 
 | Step | You provide | The package does |
 | --- | --- | --- |
@@ -91,6 +115,61 @@ The result of `present` is never treated as proof of payment. Only `verify` deci
 ### Do I need `verify`?
 
 Yes. eSewa gives the device no proof of payment: returning from eSewa only means the user came back. Only **your server**, asking eSewa's API, knows whether it was paid, so `verify` is what turns "the user returned" into `success`. It is also what makes the flow resilient: if the app is killed or the network drops, calling `verify` again later gives the right answer.
+
+### Choosing Intent or ePay
+
+```mermaid
+flowchart TD
+    A["start()"] --> B{"flow option"}
+    B -->|"auto"| C{"eSewa app installed?"}
+    B -->|"intent"| I
+    B -->|"epay"| E
+    C -->|"yes"| I["initiate with flow intent: server books the payment and returns the deeplink"]
+    C -->|"no"| E["initiate with flow epay: server returns the URL of the signed form page"]
+    I --> I2["Open the eSewa app with the deeplink"]
+    E --> E2["Open the ePay page in the browser"]
+    E2 --> E3["User pays on eSewa, eSewa redirects to your success_url"]
+    I2 --> R["User returns to your app"]
+    E3 --> R
+    R --> V["verify: poll your server until it settles"]
+    V --> O{"Server answer"}
+    O -->|"success"| OK["success: onSuccess"]
+    O -->|"failed or timeout"| ER["onError"]
+```
+
+`initiate` receives `{ flow }`, so **your server must prepare whichever flow the device chose**. Returning the wrong one is the most common mistake.
+
+### Outcomes and states
+
+While a payment runs, `status` moves through these states, and it always ends in exactly one outcome:
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> initiating: start()
+    initiating --> presenting: initiate resolved
+    initiating --> failed: initiate threw
+    presenting --> verifying: gateway returned
+    presenting --> cancelled: user backed out
+    presenting --> failed: gateway error
+    verifying --> success: verify returned success
+    verifying --> failed: verify returned failed
+    verifying --> timeout: still pending at timeoutMs
+    verifying --> cancelled: aborted through signal
+    success --> [*]
+    failed --> [*]
+    cancelled --> [*]
+    timeout --> [*]
+```
+
+| Outcome | Meaning | Callback | What to show the user |
+| --- | --- | --- | --- |
+| `success` | Your server confirmed the payment. | `onSuccess` | The receipt or unlocked content. |
+| `failed` | The payment failed, `initiate` threw, or the gateway reported an error. `error.code` says which. | `onError` | An error and a "Try again" button. |
+| `cancelled` | The user backed out, or you aborted through `signal`. | `onCancel` | Nothing, or a neutral "Payment cancelled". |
+| `timeout` | Still `pending` when `timeoutMs` ran out. **The payment may still complete**, so do not tell the user they were not charged. | `onError` (`E_TIMEOUT`) | "We are still confirming your payment", and check the order status later. |
+
+`success` is only ever produced by your server (`verify`), except for Khalti without a `verify` (see below).
 
 ## Quick start
 
@@ -201,6 +280,16 @@ The same helpers are exported by all three Klixsoft payment packages, so you can
 
 ## Server contract
 
+Your server needs to expose these endpoints (the names are examples, use your own routes):
+
+| Endpoint on your server | Called by | What it must do |
+| --- | --- | --- |
+| `POST /orders/:id/esewa` with `{ flow }` | `initiate` | `intent`: call eSewa's *book payment* API and return `{ deeplink }`. `epay`: return `{ epayUrl }`, a page on your server that auto-submits the signed ePay form to eSewa. |
+| `GET /orders/:id/status` | `verify` | Ask eSewa's status API (Intent: `payment/status`, ePay: `transaction/status`). Return `success` only for a completed payment of the expected amount, otherwise `pending` or `failed`. |
+| `GET /esewa/epay/return` (ePay only) | eSewa | The `success_url` / `failure_url`. Send the user back to your app; do not grant access here. |
+| `POST /webhooks/esewa` (Intent, recommended) | eSewa | Verify the signature and update the order, so it is paid even if the app never returns. |
+
+
 | Flow | What your server does in `initiate` | What it returns |
 | --- | --- | --- |
 | Intent | Calls eSewa's *book payment* API with the signed request. | `{ deeplink }` from the booking response. |
@@ -222,6 +311,16 @@ The same helpers are exported by all three Klixsoft payment packages, so you can
 | `EsewaError`, `EsewaErrorCode` | Typed errors. |
 
 Full signatures and options are in the [API reference](docs/api-reference.md).
+
+## Common mistakes
+
+- **Putting the eSewa secret key in the app.** Signing must happen on your server.
+- **Returning `deeplink` when `flow` was `epay` (or the reverse).** Read `context.flow` in `initiate`.
+- **Trusting the return.** Coming back from eSewa, a deep link or the decoded ePay payload only means the user returned. It can be forged; `verify` decides.
+- **Forgetting `LSApplicationQueriesSchemes` on iOS.** Without `esewa` in `Info.plist`, `flow: 'auto'` never picks Intent.
+- **Reusing an ePay `transaction_uuid`.** Generate a new one on every `initiate`.
+- **Signing a different amount than you send.** The signed `total_amount` must match the form and the status check exactly.
+- **Not rebuilding the native app** after installing. `E_NOT_LINKED` means the native module is missing.
 
 ## Errors
 
