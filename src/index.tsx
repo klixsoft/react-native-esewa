@@ -1,4 +1,4 @@
-export { isEsewaInstalled, openEsewaStore, pay } from './esewa';
+export { isAvailable, isEsewaInstalled, openEsewaStore, pay } from './esewa';
 export { EsewaError, EsewaErrorCode } from './errors';
 export type { EsewaErrorCodeValue } from './errors';
 export { extractEpayData, parseEpayData, parseEpayReturnUrl } from './epay';

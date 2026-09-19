@@ -13,5 +13,6 @@ All notable changes to this project are documented here. The format follows
 - `flow: 'auto'` chooses Intent when the eSewa app is installed, otherwise ePay.
 - `pay`, `isEsewaInstalled`, `openEsewaStore`, `parseEpayData` and `parseEpayReturnUrl`.
 - `EsewaError` with stable `EsewaErrorCode` values.
+- `onSuccess`, `onCancel` and `onError` callbacks on every flow; `verify` is optional where the gateway SDK reports a trustworthy result.
 - Standard payment lifecycle shared by all Klixsoft payment packages: `runPaymentFlow`,
   `usePaymentFlow`, `pollPaymentState` and the `PaymentState` / `PaymentOutcome` / `PaymentStatus` types.

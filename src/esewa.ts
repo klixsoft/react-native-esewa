@@ -24,6 +24,11 @@ function requireUrl(name: string, value: string | undefined): string {
   return text;
 }
 
+/** True when the native module is linked. The eSewa app itself is checked with `isEsewaInstalled`. */
+export function isAvailable(): boolean {
+  return NativeEsewa != null;
+}
+
 /** True when the eSewa app is installed on this device. */
 export async function isEsewaInstalled(): Promise<boolean> {
   return requireNative().isInstalled();

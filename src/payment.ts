@@ -1,7 +1,7 @@
 import { EsewaError } from './errors';
 import { isEsewaInstalled, pay } from './esewa';
 import { runPaymentFlow } from './flow';
-import type { PaymentFlowOptions, PaymentFlowResult, PaymentState, PollOptions, PaymentStatus } from './flow';
+import type { PaymentFlowOptions, PaymentFlowResult, PaymentState, PollOptions } from './flow';
 import type { EsewaFlow } from './types';
 import { usePaymentFlow } from './usePaymentFlow';
 import type { UsePaymentFlowResult } from './usePaymentFlow';
@@ -24,10 +24,20 @@ export interface EsewaInitiation extends EsewaInitiateResult {
   flow: EsewaFlow;
 }
 
-export interface EsewaPaymentOptions extends PollOptions {
+export interface EsewaPaymentOptions
+  extends PollOptions,
+    Partial<
+      Pick<
+        PaymentFlowOptions<EsewaInitiation>,
+        'onSuccess' | 'onCancel' | 'onError' | 'onStatus' | 'maxVerifyErrors'
+      >
+    > {
   /** Step 1. Ask your server to book (Intent) or sign (ePay) the payment for `context.flow`. */
   initiate: (context: EsewaInitiateContext) => Promise<EsewaInitiateResult>;
-  /** Step 3. Ask your server whether the payment finished. */
+  /**
+   * Step 3. Ask your server whether the payment finished. Required: eSewa gives the device no proof
+   * of payment, so only your server's status check can say.
+   */
   verify: () => Promise<PaymentState>;
   /** `auto` (default) uses Intent when the eSewa app is installed, otherwise ePay. */
   flow?: EsewaFlow | 'auto';
@@ -35,8 +45,6 @@ export interface EsewaPaymentOptions extends PollOptions {
   returnPrefix?: string;
   /** Opens the ePay page. Defaults to the system browser. */
   openUrl?: (url: string) => Promise<unknown>;
-  maxVerifyErrors?: number;
-  onStatus?: (status: PaymentStatus) => void;
 }
 
 async function resolveFlow(requested: EsewaFlow | 'auto'): Promise<EsewaFlow> {

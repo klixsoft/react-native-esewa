@@ -88,30 +88,28 @@ Every Klixsoft payment package follows the same three-step lifecycle, so switchi
 
 The result of `present` is never treated as proof of payment. Only `verify` decides the outcome, and it should always be answered by your server from eSewa's own API.
 
+### Do I need `verify`?
+
+Yes. eSewa gives the device no proof of payment: returning from eSewa only means the user came back. Only **your server**, asking eSewa's API, knows whether it was paid, so `verify` is what turns "the user returned" into `success`. It is also what makes the flow resilient: if the app is killed or the network drops, calling `verify` again later gives the right answer.
+
 ## Quick start
 
 ```tsx
 import { useEsewaPayment } from '@klixsoft/react-native-esewa';
 
 function PayButton({ orderId }: { orderId: string }) {
-  const { start, status, isProcessing } = useEsewaPayment({
+  const { start, isProcessing } = useEsewaPayment({
     initiate: async ({ flow }) => {
       const order = await api.post(`/orders/${orderId}/esewa`, { flow });
       return { deeplink: order.deeplink, epayUrl: order.epay_url };
     },
     verify: async () => (await api.get(`/orders/${orderId}/status`)).status,
+    onSuccess: () => navigation.replace('Receipt'),
+    onCancel: () => Toast.show('Payment cancelled'),
+    onError: (error) => Toast.show(error instanceof Error ? error.message : 'Payment failed'),
   });
 
-  return (
-    <Button
-      title={isProcessing ? status : 'Pay with eSewa'}
-      disabled={isProcessing}
-      onPress={async () => {
-        const result = await start();
-        if (result?.outcome === 'success') navigation.replace('Receipt');
-      }}
-    />
-  );
+  return <Button title="Pay with eSewa" disabled={isProcessing} onPress={start} />;
 }
 ```
 
@@ -147,6 +145,22 @@ const { outcome, initiation } = await processEsewaPayment({
 | `'intent'` | eSewa app only. Fails with `E_NOT_INSTALLED` if it is missing. |
 | `'epay'` | Hosted ePay v2 page only. |
 
+### Callbacks
+
+Instead of reading the result, you can react to the outcome:
+
+```ts
+processEsewaPayment({
+  initiate,
+  verify,
+  onSuccess: (initiation) => navigation.replace('Receipt'),
+  onCancel: () => showToast('Payment cancelled'),
+  onError: (error) => showToast(error instanceof Error ? error.message : 'Payment failed'),
+});
+```
+
+Each callback is called at most once per payment. `onError` receives a `PaymentFlowError` (`E_PAYMENT_FAILED` or `E_TIMEOUT`) when the server reports a failure or the payment never settles, or the original error when a step throws.
+
 ### Low level
 
 ```ts
@@ -167,6 +181,9 @@ await pay({ flow: 'epay', epay: { url, returnPrefix: 'myapp://esewa' } });
 | `openUrl` | system browser | Custom opener for ePay, for example an in-app browser. |
 | `intervalMs` / `timeoutMs` | `3000` / `120000` | `verify` polling. |
 | `maxVerifyErrors` | `3` | Consecutive `verify` failures tolerated. |
+| `onSuccess` | none | Called once, with what `initiate` returned, when the payment succeeded. |
+| `onCancel` | none | Called once when the user backed out or stopped waiting. |
+| `onError` | none | Called once when the payment failed or timed out (a `PaymentFlowError`) or a step threw. When set, thrown errors no longer reject: the flow resolves `failed` with `result.error`. |
 | `signal`, `onStatus` | none | Abort control and step callback. |
 
 ### Generic building blocks
@@ -199,6 +216,7 @@ The same helpers are exported by all three Klixsoft payment packages, so you can
 | `useEsewaPayment(options)` | Complete payment as a React hook. |
 | `createEsewaFlow(options)` | The flow object, for `runPaymentFlow` / `usePaymentFlow`. |
 | `pay(options)` | Open eSewa only (Intent or ePay). |
+| `isAvailable()` | True when the native module is linked. |
 | `isEsewaInstalled()` / `openEsewaStore()` | Install check and store link. |
 | `parseEpayData(data)` / `parseEpayReturnUrl(url)` | Decode the (unverified) ePay return payload. |
 | `EsewaError`, `EsewaErrorCode` | Typed errors. |
@@ -207,7 +225,7 @@ Full signatures and options are in the [API reference](docs/api-reference.md).
 
 ## Errors
 
-`EsewaError.code` is one of `E_NOT_INSTALLED`, `E_OPEN_FAILED`, `E_NO_FLOW`, `E_TIMEOUT`, `E_ABORTED`, `E_INVALID_ARGUMENTS`, `E_INVALID_RESPONSE`, `E_NOT_LINKED`. `error.isCancelled` is true when the user never came back or the wait was aborted. The generic flow raises `PaymentFlowError` with `E_TIMEOUT`, `E_ABORTED` or `E_VERIFY_FAILED`.
+`EsewaError.code` is one of `E_NOT_INSTALLED`, `E_OPEN_FAILED`, `E_NO_FLOW`, `E_TIMEOUT`, `E_ABORTED`, `E_INVALID_ARGUMENTS`, `E_INVALID_RESPONSE`, `E_NOT_LINKED`. `error.isCancelled` is true when the user never came back or the wait was aborted. The generic flow raises `PaymentFlowError` with `E_TIMEOUT`, `E_ABORTED`, `E_VERIFY_FAILED`, `E_PAYMENT_FAILED` or `E_NO_VERIFY`.
 
 ## Security
 
