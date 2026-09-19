@@ -1,0 +1,60 @@
+{
+  "name": "@klixsoft/react-native-esewa",
+  "version": "0.1.0",
+  "description": "eSewa payments for React Native: the official Intent flow (app-to-app) and ePay v2, with no embedded WebView.",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "react-native": "src/index.tsx",
+  "source": "src/index.tsx",
+  "files": [
+    "src",
+    "android",
+    "ios",
+    "docs",
+    "RNKlixsoftEsewa.podspec",
+    "!android/build",
+    "!**/__tests__"
+  ],
+  "keywords": [
+    "react-native",
+    "esewa",
+    "payment",
+    "payment-gateway",
+    "nepal",
+    "epay",
+    "intent",
+    "deeplink",
+    "ios",
+    "android",
+    "turbomodule"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import ./__tests__/register.mjs --test __tests__/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klixsoft/react-native-esewa.git"
+  },
+  "bugs": {
+    "url": "https://github.com/klixsoft/react-native-esewa/issues"
+  },
+  "homepage": "https://github.com/klixsoft/react-native-esewa#readme",
+  "author": "Klixsoft",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.76.0"
+  },
+  "codegenConfig": {
+    "name": "RNKlixsoftEsewaSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.klixsoft.esewa"
+    }
+  }
+}
