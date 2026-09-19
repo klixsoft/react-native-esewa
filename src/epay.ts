@@ -14,18 +14,51 @@ export interface EpayResponse {
   signature?: string;
 }
 
-const BASE64_URL_SAFE = /[-_]/g;
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function base64ToBytes(input: string): number[] {
+  const clean = input.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  const bytes: number[] = [];
+  let buffer = 0;
+  let bits = 0;
+
+  for (const char of clean) {
+    const value = BASE64_ALPHABET.indexOf(char);
+    if (value < 0) throw new Error('invalid base64');
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((buffer >> bits) & 0xff);
+    }
+  }
+  return bytes;
+}
+
+function utf8ToString(bytes: number[]): string {
+  let out = '';
+  for (let i = 0; i < bytes.length; ) {
+    const b = bytes[i++];
+    let code = b;
+    let extra = 0;
+    if (b >= 0xf0) {
+      code = b & 0x07;
+      extra = 3;
+    } else if (b >= 0xe0) {
+      code = b & 0x0f;
+      extra = 2;
+    } else if (b >= 0xc0) {
+      code = b & 0x1f;
+      extra = 1;
+    }
+    for (; extra > 0; extra--) code = (code << 6) | (bytes[i++] & 0x3f);
+    out += String.fromCodePoint(code);
+  }
+  return out;
+}
 
 function decodeBase64(input: string): string {
-  const normalized = input.replace(BASE64_URL_SAFE, (char) => (char === '-' ? '+' : '/'));
-  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-
-  if (typeof atob === 'function') {
-    const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  }
-  throw new EsewaError(EsewaErrorCode.InvalidResponse, 'No base64 decoder is available in this runtime.');
+  return utf8ToString(base64ToBytes(input));
 }
 
 /**
