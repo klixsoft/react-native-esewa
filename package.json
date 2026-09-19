@@ -1,6 +1,6 @@
 {
   "name": "@klixsoft/react-native-esewa",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "description": "eSewa payments for React Native: the official Intent flow (app-to-app) and ePay v2, with no embedded WebView.",
   "main": "src/index.tsx",
   "types": "src/index.tsx",
